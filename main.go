@@ -2,10 +2,9 @@
 package tidy
 
 /*
-#cgo CFLAGS: -I/usr/include/tidy
-#cgo LDFLAGS: -ltidy -L/usr/local/lib
 #include <tidy.h>
-#include <buffio.h>
+#include <tidybuffio.h>
+#include <tidyplatform.h>
 #include <errno.h>
 */
 import "C"
@@ -16,6 +15,12 @@ import (
 	"unsafe"
 )
 
+type TidyOutput struct {
+	Output      string
+	Diagnostics string
+	Errors      bool
+}
+
 type Tidy struct {
 	tdoc   C.TidyDoc
 	errbuf C.TidyBuffer
@@ -24,15 +29,17 @@ type Tidy struct {
 func New() *Tidy {
 	t := &Tidy{}
 	t.tdoc = C.tidyCreate()
+	C.tidyBufInit(&t.errbuf)
+
 	return t
 }
 
-func (this *Tidy) Free() {
-	C.tidyBufFree(&this.errbuf)
-	C.tidyRelease(this.tdoc)
+func (tidy *Tidy) Free() {
+	C.tidyBufFree(&tidy.errbuf)
+	C.tidyRelease(tidy.tdoc)
 }
 
-func (this *Tidy) Tidy(htmlSource string) (string, error) {
+func (tidy *Tidy) Tidy(htmlSource string) (TidyOutput, error) {
 	input := C.CString(htmlSource)
 	defer C.free(unsafe.Pointer(input))
 
@@ -41,36 +48,40 @@ func (this *Tidy) Tidy(htmlSource string) (string, error) {
 
 	var rc C.int = -1
 
-	rc = C.tidySetErrorBuffer(this.tdoc, &this.errbuf) // Capture diagnostics
+	rc = C.tidySetErrorBuffer(tidy.tdoc, &tidy.errbuf) // Capture diagnostics
 
 	if rc >= 0 {
-		rc = C.tidyParseString(this.tdoc, (*C.tmbchar)(input)) // Parse the input
+		rc = C.tidyParseString(tidy.tdoc, (*C.tmbchar)(input)) // Parse the input
 	}
 
 	if rc >= 0 {
-		rc = C.tidyCleanAndRepair(this.tdoc) // Tidy it up!	
+		rc = C.tidyCleanAndRepair(tidy.tdoc) // Tidy it up!
 	}
 
 	if rc >= 0 {
-		rc = C.tidyRunDiagnostics(this.tdoc) // Kvetch
+		rc = C.tidyRunDiagnostics(tidy.tdoc) // Kvetch
 	}
 
 	if rc > 1 { // If error, force output.
-		if C.tidyOptSetBool(this.tdoc, C.TidyForceOutput, C.yes) == 0 {
+		if C.tidyOptSetBool(tidy.tdoc, C.TidyForceOutput, C.yes) == 0 {
 			rc = -1
 		}
 	}
 
 	if rc >= 0 {
-		rc = C.tidySaveBuffer(this.tdoc, &output) // Pretty Print
+		rc = C.tidySaveBuffer(tidy.tdoc, &output) // Pretty Print
 	}
 
 	if rc >= 0 {
+		output := C.GoStringN((*C.char)(unsafe.Pointer(output.bp)), C.int(output.size))
+		tidyOutput := TidyOutput{Output: output}
 		if rc > 0 {
-			err := errors.New(C.GoStringN((*C.char)(unsafe.Pointer(this.errbuf.bp)), C.int(this.errbuf.size)))
-			return C.GoStringN((*C.char)(unsafe.Pointer(output.bp)), C.int(output.size)), err
+			tidyOutput.Diagnostics = C.GoStringN((*C.char)(unsafe.Pointer(tidy.errbuf.bp)), C.int(tidy.errbuf.size))
+			tidyOutput.Errors = rc > 1
 		}
-		return C.GoStringN((*C.char)(unsafe.Pointer(output.bp)), C.int(output.size)), nil
+
+		return tidyOutput, nil
 	}
-	return "", os.NewSyscallError(fmt.Sprintf("A severe error (%d) occurred.\n", int(rc)), errors.New(string(rc)))
+
+	return TidyOutput{}, os.NewSyscallError(fmt.Sprintf("A severe error (%d) occurred.\n", int(rc)), errors.New(string(rc)))
 }

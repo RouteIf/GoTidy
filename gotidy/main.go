@@ -3,14 +3,15 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io"
 	"log"
-	"io/ioutil"
 	"os"
-	"github.com/JalfResi/GoTidy"
+
+	tidy "github.com/RouteIf/GoTidy"
 )
 
 var (
-	debug  *bool = flag.Bool("debug", false, "Output debugging messages")  
+	debug *bool = flag.Bool("debug", false, "Output debugging messages")
 )
 
 func main() {
@@ -27,17 +28,15 @@ func main() {
 	t.AsciiChars(true)
 	t.NumericEntities(true)
 	t.FixUri(true)
-	t.DropEmptyParas(true)
-	t.DropFontTags(true)
 	t.DropProprietaryAttributes(true)
 	t.FixBackslash(true)
 	t.JoinClasses(true)
 	t.JoinStyles(true)
 	t.ShowBodyOnly(tidy.True)
 
-	in, _ := ioutil.ReadAll(os.Stdin)
+	in, _ := io.ReadAll(os.Stdin)
 	output, err := t.Tidy(string(in))
-	if *debug == true && err != nil {
+	if *debug && err != nil {
 		log.Fatal(err, output)
 	}
 	fmt.Println(output)
